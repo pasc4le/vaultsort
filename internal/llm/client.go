@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -161,10 +162,30 @@ func toRawMessages(messages []Message) []RawMessage {
 				case "text":
 					parts[j] = map[string]any{"type": "text", "text": p.Text}
 				case "input_file":
-					parts[j] = map[string]any{
-						"type":     "input_file",
-						"filename": p.Filename,
-						"file_data": p.FileData,
+					switch {
+					case strings.HasPrefix(p.MediaType, "image/"):
+						// Standard OpenAI image_url type with data URI
+						dataURI := fmt.Sprintf("data:%s;base64,%s", p.MediaType, p.RawData)
+						parts[j] = map[string]any{
+							"type":      "image_url",
+							"image_url": map[string]any{"url": dataURI},
+						}
+					case strings.HasPrefix(p.MediaType, "video/"):
+						dataURI := fmt.Sprintf("data:%s;base64,%s", p.MediaType, p.RawData)
+						parts[j] = map[string]any{
+							"type":       "video_url",
+							"video_url":  map[string]any{"url": dataURI},
+						}
+					default:
+						// Non-media files (PDF, text, etc.) — embed as text content
+						decoded, err := base64.StdEncoding.DecodeString(p.RawData)
+						if err != nil {
+							decoded = []byte(fmt.Sprintf("[file: %s, could not decode]", p.Filename))
+						}
+						parts[j] = map[string]any{
+							"type": "text",
+							"text": string(decoded),
+						}
 					}
 				default:
 					parts[j] = map[string]any{"type": p.Type}
