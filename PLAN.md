@@ -55,11 +55,18 @@ vaultsort/
 │   │   └── organizer.go         # File movement logic, path safety checks
 │   └── service/
 │       └── launchd.go           # macOS launchd plist generation
+├── docs/
+│   ├── configuration.md         # Full config reference
+│   ├── rules.md                 # Rule engine documentation
+│   ├── providers.md             # LLM provider setup guides
+│   ├── service.md               # macOS service management
+│   └── development.md           # Contributing & architecture notes
 ├── config.example.toml          # Example configuration
 ├── go.mod
 ├── go.sum
 ├── Makefile
-└── README.md
+├── LICENSE                      # EUPL v1.2
+└── README.md                    # Slim: project intro + install command only
 ```
 
 ---
@@ -544,6 +551,24 @@ launchctl start com.vaultsort
 launchctl stop com.vaultsort
 launchctl list | grep vaultsort
 ```
+
+---
+
+## Documentation Structure
+
+**README.md** (slim — presentation only):
+- One-liner description
+- Key features (bullet list, 4-5 items)
+- Installation command (brew or curl one-liner)
+- Link to `docs/` for full documentation
+- License badge
+
+**docs/** (full technical & user documentation):
+- `docs/configuration.md` — Complete config.toml reference with all options
+- `docs/rules.md` — Rule engine: matchers, actions, prompt templates
+- `docs/providers.md` — LLM provider setup (OpenAI, Anthropic, Ollama, Azure, custom)
+- `docs/service.md` — macOS LaunchAgent management, troubleshooting
+- `docs/development.md` — Architecture, contributing, building from source
 
 ---
 
