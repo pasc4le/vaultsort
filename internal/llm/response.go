@@ -15,8 +15,21 @@ type LLMResponse struct {
 }
 
 // ParseResponse extracts a valid LLMResponse from LLM output text.
-// Handles JSON in markdown code blocks, plain JSON, and various edge cases.
+// With structured output, the response is already valid JSON.
+// Falls back to extraction from markdown/text for non-structured providers.
 func ParseResponse(text string) (*LLMResponse, error) {
+	// Fast path: try direct parse (structured output returns clean JSON)
+	if strings.HasPrefix(strings.TrimSpace(text), "{") {
+		var resp LLMResponse
+		if err := json.Unmarshal([]byte(text), &resp); err == nil {
+			if err := validateResponse(&resp); err != nil {
+				return nil, err
+			}
+			return &resp, nil
+		}
+	}
+
+	// Fallback: extract JSON from markdown or text
 	jsonStr := extractJSON(text)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in LLM response")
@@ -27,7 +40,6 @@ func ParseResponse(text string) (*LLMResponse, error) {
 		return nil, fmt.Errorf("parse JSON: %w", err)
 	}
 
-	// Validate
 	if err := validateResponse(&resp); err != nil {
 		return nil, err
 	}
@@ -69,7 +81,6 @@ func extractJSON(text string) string {
 					if json.Valid([]byte(candidate)) {
 						return candidate
 					}
-					// Still try partial parse
 					return candidate
 				}
 			}
@@ -81,35 +92,27 @@ func extractJSON(text string) string {
 
 // validateResponse checks that the LLM response meets safety requirements.
 func validateResponse(resp *LLMResponse) error {
-	// Must have filename
 	if resp.Filename == "" {
 		return fmt.Errorf("LLM response has empty filename")
 	}
-
-	// Must have subdir
 	if resp.Subdir == "" {
 		return fmt.Errorf("LLM response has empty subdir")
 	}
 
-	// Sanitize filename: remove path separators, control chars
 	resp.Filename = sanitizeFilename(resp.Filename)
 	if resp.Filename == "" {
 		return fmt.Errorf("filename is empty after sanitization")
 	}
 
-	// Ensure extension is preserved
 	resp.Filename = ensureExtension(resp.Filename)
 
-	// Subdir must be relative (no leading /)
 	resp.Subdir = strings.TrimPrefix(resp.Subdir, "/")
 	resp.Subdir = strings.TrimSuffix(resp.Subdir, "/")
 
-	// Reject path traversal
 	if strings.Contains(resp.Subdir, "..") || strings.Contains(resp.Filename, "..") {
 		return fmt.Errorf("path traversal detected: %s / %s", resp.Subdir, resp.Filename)
 	}
 
-	// Subdir must not be absolute
 	if filepath.IsAbs(resp.Subdir) {
 		return fmt.Errorf("subdir is absolute path: %s", resp.Subdir)
 	}
@@ -119,22 +122,17 @@ func validateResponse(resp *LLMResponse) error {
 
 // sanitizeFilename removes dangerous characters from a filename.
 func sanitizeFilename(name string) string {
-	// Remove null bytes
 	name = strings.ReplaceAll(name, "\x00", "")
-	// Remove path separators
 	name = strings.ReplaceAll(name, "/", "")
 	name = strings.ReplaceAll(name, "\\", "")
-	// Remove control characters (except printable)
 	re := regexp.MustCompile(`[[:cntrl:]]`)
 	name = re.ReplaceAllString(name, "")
-	// Trim whitespace and dots
 	name = strings.TrimSpace(name)
 	name = strings.TrimRight(name, ".")
 	return name
 }
 
 // ensureExtension makes sure the filename has an extension.
-// If not, returns the original name (don't guess).
 func ensureExtension(name string) string {
 	if filepath.Ext(name) != "" {
 		return name

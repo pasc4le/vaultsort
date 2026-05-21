@@ -2,52 +2,71 @@ package llm
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 )
 
 // PromptInput holds data for constructing a prompt from a template.
 type PromptInput struct {
 	Filename     string
-	FileContents []byte // may be nil
+	FileContents []byte // raw file bytes — sent as actual file part
 	VaultDir     string
 	Template     string
 }
 
-// BuildPrompt constructs system and user messages from a template.
-// It replaces {{filename}}, {{file_contents}}, and {{vault_dir}} placeholders.
+// detectMIME detects the MIME type of raw bytes.
+func detectMIME(data []byte) string {
+	if len(data) == 0 {
+		return "text/plain"
+	}
+	// Use net/http's DetectContentType for the first 512 bytes
+	sniff := data
+	if len(sniff) > 512 {
+		sniff = data[:512]
+	}
+	mime := http.DetectContentType(sniff)
+	// Trim parameters (e.g. "text/plain; charset=utf-8" → "text/plain")
+	if idx := strings.Index(mime, ";"); idx >= 0 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	return mime
+}
+
+// BuildPrompt constructs system and user messages.
+// If FileContents is provided, it is sent as an actual file part (base64)
+// rather than string interpolation into the prompt text.
 func BuildPrompt(input PromptInput) []Message {
-	// Determine content excerpt
-	var contentStr string
-	if len(input.FileContents) > 0 {
-		// Limit to first 10KB for LLM context
-		limit := 10240
-		if len(input.FileContents) < limit {
-			limit = len(input.FileContents)
-		}
-		contentStr = string(input.FileContents[:limit])
-	}
-
-	// Replace placeholders in the user prompt template
-	prompt := input.Template
-	prompt = strings.ReplaceAll(prompt, "{{filename}}", input.Filename)
-	prompt = strings.ReplaceAll(prompt, "{{vault_dir}}", input.VaultDir)
-	if contentStr != "" {
-		prompt = strings.ReplaceAll(prompt, "{{file_contents}}", contentStr)
-	} else {
-		prompt = strings.ReplaceAll(prompt, "{{file_contents}}", "(file contents not available)")
-	}
-
-	// Build system message
 	systemMsg := Message{
 		Role:    "system",
 		Content: "You are a file organization assistant. Respond only with valid JSON.",
+	}
+
+	// Build user prompt text (template without file content interpolation)
+	prompt := input.Template
+	prompt = strings.ReplaceAll(prompt, "{{filename}}", input.Filename)
+	prompt = strings.ReplaceAll(prompt, "{{vault_dir}}", input.VaultDir)
+	prompt = strings.ReplaceAll(prompt, "{{file_contents}}", "(file attached as part)")
+
+	if len(input.FileContents) > 0 {
+		mimeType := detectMIME(input.FileContents)
+		// Limit to 10KB for LLM context (most providers have context limits)
+		limit := 10240
+		fileData := input.FileContents
+		if len(fileData) > limit {
+			fileData = fileData[:limit]
+		}
+
+		userMsg := WithParts("user", []MessagePart{
+			TextPart(prompt),
+			FilePart(input.Filename, fileData, mimeType),
+		})
+		return []Message{systemMsg, userMsg}
 	}
 
 	userMsg := Message{
 		Role:    "user",
 		Content: prompt,
 	}
-
 	return []Message{systemMsg, userMsg}
 }
 
