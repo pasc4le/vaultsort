@@ -291,6 +291,11 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message) (string,
 	return "", fmt.Errorf("after %d retries: %w", c.maxRetries, lastErr)
 }
 
+// EndpointURL returns the full API endpoint URL this client will call.
+func (c *Client) EndpointURL() string {
+	return c.buildURL()
+}
+
 // buildURL constructs the API endpoint URL based on provider.
 func (c *Client) buildURL() string {
 	switch c.provider {

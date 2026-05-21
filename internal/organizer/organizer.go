@@ -125,8 +125,9 @@ func (o *Organizer) ProcessFile(ctx context.Context, watchPath string, filePath 
 	})
 
 	// 4. Call LLM
-	o.logger.Debug("submitting prompt to LLM",
+	o.logger.Debug("sending to LLM",
 		"rule", rule.Name,
+		"endpoint", o.llmClient.EndpointURL(),
 		"messages", len(messages),
 	)
 	result, err := o.callLLM(ctx, messages, rule)
