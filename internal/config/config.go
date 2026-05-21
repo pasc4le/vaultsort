@@ -80,6 +80,11 @@ func Load(configPath string) (*Config, error) {
 			return nil, fmt.Errorf("setting VAULTSORT_LLM_MODEL: %w", err)
 		}
 	}
+	if v := os.Getenv("VAULTSORT_VAULT_DIR"); v != "" {
+		if err := k.Set("settings.vault_dir", v); err != nil {
+			return nil, fmt.Errorf("setting VAULTSORT_VAULT_DIR: %w", err)
+		}
+	}
 
 	// Unmarshal into config struct
 	var cfg Config

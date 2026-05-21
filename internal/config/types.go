@@ -16,6 +16,7 @@ type Settings struct {
 	MaxFileSize  int64  `koanf:"max_file_size"`
 	LogLevel     string `koanf:"log_level"`
 	LogFile      string `koanf:"log_file"`
+	VaultDir     string `koanf:"vault_dir"`
 }
 
 // LLMConfig holds LLM provider configuration.

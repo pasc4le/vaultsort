@@ -14,6 +14,10 @@ log_level = "info"
 # Log file path (optional, defaults to stderr)
 # log_file = "/Users/you/.local/state/vaultsort/log"
 
+# Vault directory where files will be organized (default: ~/Vault)
+# Can also be set via VAULTSORT_VAULT_DIR env var.
+# vault_dir = "/Users/you/Vault"
+
 # ─── LLM Provider ──────────────────────────────────────────────────────────────
 
 [llm]

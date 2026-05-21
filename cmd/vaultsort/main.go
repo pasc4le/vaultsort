@@ -155,7 +155,7 @@ Flags:
 		logger = slog.New(slog.NewTextHandler(os.Stderr, loggerOpts))
 	}
 
-	vaultDir := os.Getenv("VAULTSORT_VAULT_DIR")
+	vaultDir := cfg.Settings.VaultDir
 	if vaultDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -330,6 +330,9 @@ func runCheck(configPath string) error {
 	fmt.Printf("  Max file size: %d bytes\n", cfg.Settings.MaxFileSize)
 	fmt.Printf("  Log level: %s\n", cfg.Settings.LogLevel)
 
+	if cfg.Settings.VaultDir != "" {
+		fmt.Printf("  Vault dir: %s\n", cfg.Settings.VaultDir)
+	}
 	if cfg.Settings.LogFile != "" {
 		fmt.Printf("  Log file: %s\n", cfg.Settings.LogFile)
 	}

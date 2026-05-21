@@ -33,6 +33,7 @@ VaultSort configuration uses TOML format and lives at `~/.config/vaultsort/confi
 | `max_file_size` | int | `1048576` | Max file size in bytes for LLM content analysis. Larger files send filename only |
 | `log_level` | string | `"info"` | One of: `debug`, `info`, `warn`, `error` |
 | `log_file` | string | `""` | Log file path. If empty, logs to stderr |
+| `vault_dir` | string | `"~/Vault"` | Vault directory where files are organized. Can also be set via `VAULTSORT_VAULT_DIR` env var |
 
 ### `[llm]`
 
