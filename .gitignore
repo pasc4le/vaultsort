@@ -1,0 +1,39 @@
+# Binaries
+/bin/
+/vaultsort
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.sublime-*
+
+# State files (per-user, shouldn't be committed)
+state.json
+*.log
+
+# Temp / cache
+/tmp/
+/cache/
+*.tmp
