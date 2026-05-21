@@ -2,10 +2,16 @@ BINARY_NAME=vaultsort
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build install uninstall clean
+.PHONY: build install uninstall clean release
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/vaultsort
+
+release:
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-amd64 ./cmd/vaultsort
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-arm64 ./cmd/vaultsort
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-amd64 ./cmd/vaultsort
 
 install: build
 	cp bin/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
@@ -33,5 +39,7 @@ fmt:
 
 tidy:
 	go mod tidy
+
+ci: vet test build
 
 all: tidy vet test build

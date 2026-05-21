@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // fileInfo holds metadata about a file being evaluated.
@@ -30,15 +28,7 @@ func gatherFileInfo(path string) (fileInfo, error) {
 		extension: strings.TrimPrefix(filepath.Ext(path), "."),
 		fullPath:  path,
 		modTime:   info.ModTime(),
-		birthTime: info.ModTime(), // fallback
-	}
-
-	// Try to get birth time via syscall on macOS
-	if stat, ok := info.Sys().(*unix.Stat_t); ok {
-		birth := time.Unix(stat.Btim.Sec, stat.Btim.Nsec)
-		if !birth.IsZero() {
-			fi.birthTime = birth
-		}
+		birthTime: getBirthTime(info),
 	}
 
 	return fi, nil

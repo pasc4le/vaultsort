@@ -8,8 +8,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Test
+  ci:
+    name: Vet + Test + Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,42 +19,14 @@ jobs:
           go-version: "1.22"
           check-latest: true
 
-      - name: Tidy
-        run: go mod tidy
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./... -v -count=1
-
-  build:
-    name: Build
-    needs: [test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          check-latest: true
-
-      - name: Build (dry-run)
-        run: go build -o /dev/null ./cmd/vaultsort
+      - name: CI
+        run: make ci
 
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build]
+    needs: [ci]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [darwin, linux]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: linux
-            goarch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -63,17 +35,11 @@ jobs:
           go-version: "1.22"
           check-latest: true
 
-      - name: Build release binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          BINARY="vaultsort-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o "$BINARY" ./cmd/vaultsort
-          echo "BINARY=$BINARY" >> "$GITHUB_ENV"
+      - name: Build release binaries
+        run: make release
 
-      - name: Upload release asset
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: vaultsort-*
+          files: bin/vaultsort-*
           generate_release_notes: true
