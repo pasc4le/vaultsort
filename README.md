@@ -5,7 +5,7 @@ AI-powered daemon that watches directories and organizes files into a structured
 ## Install
 
 ```bash
-go install github.com/pasc4le/vaultsort@latest
+go install github.com/pasc4le/vaultsort/cmd/vaultsort@latest
 ```
 
 ## Usage
