@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "go": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "go/SKILL.md",
+      "computedHash": "5f4c5393a6b612ea79524c7e77184bdfb0ca8007cdbc0ca8c73c59d20dff3adf"
+    },
+    "golang-backend-development": {
+      "source": "manutej/luxor-claude-marketplace",
+      "sourceType": "github",
+      "skillPath": "plugins/luxor-backend-toolkit/skills/golang-backend-development/SKILL.md",
+      "computedHash": "807ea7b237d8caebfbe34be301b3898963567ae64d120888a82d0f8fe5d0fd23"
+    },
+    "unix-macos-engineer": {
+      "source": "petekp/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/unix-macos-engineer/SKILL.md",
+      "computedHash": "2a28ceef01ed133fec218cbe29349ca2d8af3edb34f947830d656ca3420005cf"
+    }
+  }
+}
