@@ -4,6 +4,69 @@
 
 **VaultSort** is a macOS-compatible background daemon that watches specified directories and uses LLM intelligence to automatically organize files into a structured vault. It applies configurable rules to filter files, then prompts an LLM to determine optimal file naming and storage location.
 
+### What is a daemon?
+A daemon is a program that runs in the background without any user interface. On macOS, daemons are managed by `launchd` (the system that starts and stops services).
+
+### What is an LLM?
+LLM stands for Large Language Model (like GPT, Claude, etc.). VaultSort sends file information to an LLM and asks it to suggest a good filename and folder structure.
+
+---
+
+## Glossary of Terms
+
+| Term | Meaning |
+|------|--------|
+| **Daemon** | A background process that runs without user interaction |
+| **launchd** | macOS system for managing background services |
+| **LaunchAgent** | A user-level service managed by launchd (runs when you log in) |
+| **LaunchDaemon** | A system-level service (runs at boot, requires sudo) |
+| **plist** | Property List — macOS config file format (XML) |
+| **fsnotify** | Go library for watching file system changes |
+| **TOML** | Tom's Obvious, Minimal Language — a config file format (like INI but better) |
+| **LLM** | Large Language Model — AI that understands and generates text |
+| **API** | Application Programming Interface — how programs talk to each other |
+| **GOROOT** | Where Go is installed on your system |
+| **GOPATH** | Where your Go projects and dependencies live |
+| **goroutine** | A lightweight thread managed by Go (not the OS) |
+| **channel** | A way for goroutines to communicate safely |
+| **mutex** | A lock to prevent multiple goroutines from accessing the same data |
+
+---
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+1. **Go installed** (version 1.22 or later)
+   ```bash
+   go version
+   # Should show: go version go1.22.0 or later
+   ```
+   If not installed: `brew install go`
+
+2. **Git installed**
+   ```bash
+   git --version
+   ```
+
+3. **A code editor** (VS Code with Go extension recommended)
+
+4. **Basic terminal knowledge** (cd, ls, mkdir, etc.)
+
+---
+
+## Skills Installed (for AI assistance)
+
+The following skills are installed in `.agents/skills/` to help with development:
+
+| Skill | Purpose | When to use |
+|-------|---------|-------------|
+| `golang-backend-development` | Go patterns, concurrency, HTTP | Writing any Go code |
+| `unix-macos-engineer` | launchd, shell scripts, macOS | Service installation, macOS-specific code |
+| `go` | Go best practices, testing | Code reviews, architecture decisions |
+
+> **Note for juniors**: When you're stuck, ask the AI to load the relevant skill for context.
+
 ---
 
 ## Language Choice: **Go**
@@ -641,6 +704,179 @@ State file: `~/.local/state/vaultsort/state.json`
 - [ ] Logging improvements
 - [ ] Documentation and README
 - [ ] Release builds for arm64/amd64
+
+---
+
+## How to Start (Step-by-Step for Juniors)
+
+### Step 1: Set up the project
+
+```bash
+# Create project directory
+mkdir -p ~/Developer/Personal/prj/organize-dir
+cd ~/Developer/Personal/prj/organize-dir
+
+# Initialize Go module
+go mod init github.com/user/vaultsort
+
+# Create directory structure
+mkdir -p cmd/vaultsort
+mkdir -p internal/{config,watcher,rules,llm,organizer,service}
+mkdir -p docs
+
+# Create main.go file
+touch cmd/vaultsort/main.go
+```
+
+### Step 2: Create Makefile
+
+```makefile
+# Copy the Makefile from the PLAN.md
+```
+
+### Step 3: Start with Config Loader
+
+1. Create `internal/config/types.go` — Define the Config struct
+2. Create `internal/config/config.go` — Load TOML files
+3. Create `config.example.toml` — Test with a sample config
+4. Write tests: `internal/config/config_test.go`
+
+### Step 4: Build the Rule Engine
+
+1. Create `internal/rules/types.go` — Define Rule, MatchCriteria, ActionConfig
+2. Create `internal/rules/matcher.go` — Implement each matcher (extension, prefix, etc.)
+3. Create `internal/rules/engine.go` — Find matching rules for a file
+4. Write tests: `internal/rules/engine_test.go`
+
+### Step 5: Add File Watcher
+
+1. Create `internal/watcher/watcher.go` — Use fsnotify to watch directories
+2. Add debouncing (wait 500ms after last event)
+3. Add polling (every 30s, catch missed events)
+4. Write tests with temp directories
+
+### Step 6: Implement LLM Client
+
+1. Create `internal/llm/client.go` — HTTP client for OpenAI-compatible API
+2. Create `internal/llm/prompt.go` — Build prompts from templates
+3. Create `internal/llm/response.go` — Parse JSON from LLM response
+4. Test with mock HTTP server
+
+### Step 7: Build Organizer
+
+1. Create `internal/organizer/organizer.go` — Orchestrate: rule → LLM → move
+2. Add path safety checks
+3. Add conflict resolution (file exists → add _1, _2, etc.)
+4. Add state tracking (JSON file)
+
+### Step 8: Add macOS Service
+
+1. Create `internal/service/launchd.go` — Generate plist file
+2. Add `install` and `uninstall` commands
+3. Test with `launchctl load/unload`
+
+### Step 9: Wire Everything Together
+
+1. Create `cmd/vaultsort/main.go` — CLI interface
+2. Add signal handling (SIGINT, SIGTERM, SIGHUP)
+3. Add logging (use `log/slog` from stdlib)
+4. Add `--dry-run` mode for testing
+
+### Step 10: Polish
+
+1. Add comprehensive error handling
+2. Write documentation in `docs/`
+3. Create README.md (slim version)
+4. Test on real directories
+5. Create release builds
+
+---
+
+## Common Pitfalls to Avoid
+
+### 1. Race Conditions
+**Problem**: Multiple goroutines accessing the same file map.
+**Solution**: Use `sync.Mutex` or `sync.RWMutex` to protect shared data.
+
+### 2. Goroutine Leaks
+**Problem**: Goroutines that never finish.
+**Solution**: Always use `context.Context` for cancellation. Use `defer cancel()`.
+
+### 3. Not Closing Channels
+**Problem**: Receivers block forever.
+**Solution**: Close channels when done sending. Use `defer close(ch)`.
+
+### 4. Ignoring Errors
+**Problem**: Silently swallowing errors.
+**Solution**: Always check `if err != nil`. Use `fmt.Errorf("context: %w", err)` to wrap.
+
+### 5. Hardcoded Paths
+**Problem**: Paths that only work on your machine.
+**Solution**: Use `os.UserHomeDir()` for `~`. Use `filepath.Join()` for paths.
+
+### 6. Forgetting macOS-Specifics
+**Problem**: Linux assumptions that fail on macOS.
+**Solution**: Use `os.Chtimes()` instead of `os.Chtimes()`. Check birthtime with `syscall.Stat_t`.
+
+---
+
+## Quick Reference: Go Commands
+
+```bash
+# Initialize module
+go mod init github.com/user/vaultsort
+
+# Add dependency
+go get github.com/fsnotify/fsnotify
+
+# Run program
+go run ./cmd/vaultsort
+
+# Build binary
+go build -o bin/vaultsort ./cmd/vaultsort
+
+# Run tests
+go test ./...
+
+# Run tests with verbose output
+go test -v ./...
+
+# Format code
+go fmt ./...
+
+# Check for errors
+go vet ./...
+```
+
+---
+
+## Using Skills for Development Help
+
+When you're stuck, the AI can load specialized skills for context. Here are some examples:
+
+### Example 1: Go Concurrency Pattern
+**You ask**: "How do I use goroutines to watch multiple directories?"
+**AI loads**: `golang-backend-development` skill
+**AI responds**: With goroutine patterns, channel usage, and WaitGroup examples
+
+### Example 2: macOS LaunchAgent
+**You ask**: "How do I create a LaunchAgent plist?"
+**AI loads**: `unix-macos-engineer` skill
+**AI responds**: With plist template, launchctl commands, and troubleshooting tips
+
+### Example 3: Testing
+**You ask**: "How do I write table-driven tests for the rule engine?"
+**AI loads**: `go` skill
+**AI responds**: With testing patterns, test helpers, and coverage tips
+
+### How to Reference Skills
+
+When asking for help, mention the domain:
+- "Using Go skills, show me how to..."
+- "With macOS engineering context, explain..."
+- "For Go backend development, what's the pattern for..."
+
+This helps the AI load the right skill and give you more accurate answers.
 
 ---
 
