@@ -125,6 +125,10 @@ func (o *Organizer) ProcessFile(ctx context.Context, watchPath string, filePath 
 	})
 
 	// 4. Call LLM
+	o.logger.Debug("submitting prompt to LLM",
+		"rule", rule.Name,
+		"messages", len(messages),
+	)
 	result, err := o.callLLM(ctx, messages, rule)
 	if err != nil {
 		// Use fallback
@@ -263,15 +267,38 @@ func (o *Organizer) markProcessed(path, ruleName, destination string) {
 
 // callLLM sends messages to the LLM and parses the response.
 func (o *Organizer) callLLM(ctx context.Context, messages []llm.Message, rule *rules.Rule) (*llm.LLMResponse, error) {
+	o.logger.Debug("llm request sent, waiting for response",
+		"rule", rule.Name,
+	)
+
 	text, err := o.llmClient.Chat(ctx, messages)
 	if err != nil {
+		o.logger.Debug("llm request failed",
+			"rule", rule.Name,
+			"error", err,
+		)
 		return nil, fmt.Errorf("LLM chat: %w", err)
 	}
 
+	o.logger.Debug("llm response received, parsing",
+		"rule", rule.Name,
+		"response_len", len(text),
+	)
+
 	resp, err := llm.ParseResponse(text)
 	if err != nil {
+		o.logger.Debug("llm response parse failed",
+			"rule", rule.Name,
+			"error", err,
+		)
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
+
+	o.logger.Debug("llm response parsed",
+		"rule", rule.Name,
+		"filename", resp.Filename,
+		"subdir", resp.Subdir,
+	)
 
 	return resp, nil
 }
