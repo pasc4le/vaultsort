@@ -149,6 +149,12 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (string, error) {
 	return c.chatOpenAICompatible(ctx, messages)
 }
 
+// supportsStructuredOutput returns true if the provider supports
+// OpenAI-compatible structured output (response_format with json_schema).
+func (c *Client) supportsStructuredOutput() bool {
+	return c.provider == ProviderOpenAI || c.provider == ProviderAzure
+}
+
 // toRawMessages converts internal Message slice to serializable RawMessage slice
 // for OpenAI-compatible providers.
 func toRawMessages(messages []Message) []RawMessage {
@@ -170,12 +176,7 @@ func toRawMessages(messages []Message) []RawMessage {
 							"type":      "image_url",
 							"image_url": map[string]any{"url": dataURI},
 						}
-					case strings.HasPrefix(p.MediaType, "video/"):
-						dataURI := fmt.Sprintf("data:%s;base64,%s", p.MediaType, p.RawData)
-						parts[j] = map[string]any{
-							"type":       "video_url",
-							"video_url":  map[string]any{"url": dataURI},
-						}
+
 					default:
 						// Non-media files (PDF, text, etc.) — embed as text content
 						decoded, err := base64.StdEncoding.DecodeString(p.RawData)
@@ -205,11 +206,13 @@ func (c *Client) chatOpenAICompatible(ctx context.Context, messages []Message) (
 
 	rawMsgs := toRawMessages(messages)
 	reqBody := ChatRequest{
-		Model:          c.model,
-		Messages:       rawMsgs,
-		Temperature:    c.temperature,
-		MaxTokens:      1024,
-		ResponseFormat: jsonResponseFormat(),
+		Model:       c.model,
+		Messages:    rawMsgs,
+		Temperature: c.temperature,
+		MaxTokens:   1024,
+	}
+	if c.supportsStructuredOutput() {
+		reqBody.ResponseFormat = jsonResponseFormat()
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -251,6 +254,9 @@ func (c *Client) chatOpenAICompatible(ctx context.Context, messages []Message) (
 		}
 
 		if resp.StatusCode != 200 {
+			if !isRetryableHTTP(resp.StatusCode) {
+				return "", fmt.Errorf("API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+			}
 			lastErr = fmt.Errorf("API error (HTTP %d): %s", resp.StatusCode, string(respBody))
 			continue
 		}
@@ -365,6 +371,9 @@ func (c *Client) chatAnthropic(ctx context.Context, messages []Message) (string,
 		}
 
 		if resp.StatusCode != 200 {
+			if !isRetryableHTTP(resp.StatusCode) {
+				return "", fmt.Errorf("anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+			}
 			lastErr = fmt.Errorf("anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
 			continue
 		}
@@ -494,4 +503,14 @@ func TextPart(text string) MessagePart {
 // WithParts creates a Message with multipart content.
 func WithParts(role string, parts []MessagePart) Message {
 	return Message{Role: role, Parts: parts}
+}
+
+// isRetryableHTTP returns true for HTTP status codes that should be retried.
+func isRetryableHTTP(statusCode int) bool {
+	switch statusCode {
+	case 429, 500, 502, 503:
+		return true
+	default:
+		return false
+	}
 }

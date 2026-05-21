@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,9 +89,9 @@ func New(
 
 // ProcessFile handles a single file: match rule, call LLM, move file.
 func (o *Organizer) ProcessFile(ctx context.Context, watchPath string, filePath string) error {
-	// Check if already processed (by path)
-	if o.isProcessed(filePath) {
-		o.logger.Debug("file already processed, skipping", "path", filePath)
+	// Check if already processed (by path) — atomic check-and-mark
+	if o.tryMarkProcessing(filePath) {
+		o.logger.Debug("file already processed or in-progress, skipping", "path", filePath)
 		return nil
 	}
 
@@ -187,8 +188,12 @@ func (o *Organizer) ProcessFile(ctx context.Context, watchPath string, filePath 
 		"rule", rule.Name,
 	)
 
-	// 10. Update state
-	o.markProcessed(filePath, rule.Name, movedPath)
+	// 10. Update state (note: tryMarkProcessing already marked it at start)
+	o.state.ProcessedFiles[filePath] = ProcessedEntry{
+		ProcessedAt: time.Now(),
+		Rule:        rule.Name,
+		Destination: movedPath,
+	}
 
 	return nil
 }
@@ -250,23 +255,19 @@ func (o *Organizer) loadState() error {
 	return nil
 }
 
-// isProcessed checks if a file path has been processed.
-func (o *Organizer) isProcessed(path string) bool {
+// tryMarkProcessing atomically checks if a file has been processed and marks it.
+// Returns true if the file was already marked (should be skipped).
+// Returns false if this call successfully claimed the file for processing.
+func (o *Organizer) tryMarkProcessing(path string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, ok := o.state.ProcessedFiles[path]
-	return ok
-}
-
-// markProcessed records a file as processed.
-func (o *Organizer) markProcessed(path, ruleName, destination string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	if _, ok := o.state.ProcessedFiles[path]; ok {
+		return true
+	}
 	o.state.ProcessedFiles[path] = ProcessedEntry{
 		ProcessedAt: time.Now(),
-		Rule:        ruleName,
-		Destination: destination,
 	}
+	return false
 }
 
 // callLLM sends messages to the LLM and parses the response.
@@ -342,7 +343,9 @@ func (o *Organizer) readFileContent(path string) ([]byte, error) {
 				"path", path, "size", info.Size(), "max", maxSize)
 			return nil, nil
 		}
-		f.Seek(0, 0)
+		if _, err := f.Seek(0, 0); err != nil {
+			return nil, fmt.Errorf("seek: %w", err)
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -352,10 +355,14 @@ func (o *Organizer) readFileContent(path string) ([]byte, error) {
 	case isTextMIME(mimeType):
 		// For text files: send a 10KB excerpt if file is large
 		if info.Size() <= int64(maxFileRead) {
-			f.Seek(0, 0)
+			if _, err := f.Seek(0, 0); err != nil {
+				return nil, fmt.Errorf("seek: %w", err)
+			}
 			return os.ReadFile(path)
 		}
-		f.Seek(0, 0)
+		if _, err := f.Seek(0, 0); err != nil {
+			return nil, fmt.Errorf("seek: %w", err)
+		}
 		buf := make([]byte, maxFileRead)
 		n, err := f.Read(buf)
 		if err != nil {
@@ -378,16 +385,24 @@ func (o *Organizer) validatePath(dest string) error {
 		return fmt.Errorf("destination path too long (%d chars)", len(dest))
 	}
 
-	// Resolve to absolute
-	abs, err := filepath.Abs(dest)
+	// Clean and resolve to absolute
+	cleaned := filepath.Clean(dest)
+	abs, err := filepath.Abs(cleaned)
 	if err != nil {
 		return fmt.Errorf("resolve absolute path: %w", err)
 	}
 
-	// Check it's under vaultDir
-	vaultAbs, _ := filepath.Abs(o.vaultDir)
-	if !strings.HasPrefix(abs, vaultAbs) {
-		return fmt.Errorf("destination %s is outside vault directory %s", abs, vaultAbs)
+	// Ensure destination is under vaultDir (not just a prefix match)
+	vaultAbs, err := filepath.Abs(o.vaultDir)
+	if err != nil {
+		return fmt.Errorf("resolve vault path: %w", err)
+	}
+	rel, err := filepath.Rel(vaultAbs, abs)
+	if err != nil {
+		return fmt.Errorf("cannot determine relative path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("destination %s escapes vault directory %s", abs, vaultAbs)
 	}
 
 	return nil
@@ -408,11 +423,13 @@ func (o *Organizer) moveFile(src, dest string) (string, error) {
 	// Move the file
 	if err := os.Rename(src, resolvedDest); err != nil {
 		// If rename fails (e.g., cross-device), fall back to copy+delete
-		if err := copyFile(src, resolvedDest); err != nil {
-			return "", fmt.Errorf("copy file: %w", err)
+		if copyErr := copyFile(src, resolvedDest); copyErr != nil {
+			return "", fmt.Errorf("copy file: %w", copyErr)
 		}
 		if err := os.Remove(src); err != nil {
-			return "", fmt.Errorf("remove source after copy: %w", err)
+			// File was copied but source couldn't be removed — log but don't fail
+			o.logger.Warn("copied file but could not remove source",
+				"src", src, "dest", resolvedDest, "error", err)
 		}
 	}
 
@@ -451,42 +468,42 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
-// httpDetectContentType wraps net/http's detection.
+// httpDetectContentType detects the MIME type using stdlib + fallbacks for HEIC/AVIF.
 func httpDetectContentType(data []byte) string {
 	if len(data) == 0 {
 		return "application/octet-stream"
 	}
-	return httpDetect(data)
+	// Use stdlib detection first (handles JPEG, PNG, GIF, WebP, etc.)
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "application/octet-stream") {
+		return mime
+	}
+	// Custom fallbacks for types stdlib doesn't know
+	if isHEIC(data) {
+		return "image/heic"
+	}
+	if isAVIF(data) {
+		return "image/avif"
+	}
+	return mime
 }
 
-// httpDetect is a local implementation to avoid importing net/http for just this.
-func httpDetect(data []byte) string {
-	// Simple MIME detection based on magic bytes
-	if len(data) < 4 {
-		return "text/plain"
+// isHEIC detects HEIC/HEIF images via "ftyp" box.
+func isHEIC(data []byte) bool {
+	if len(data) < 12 {
+		return false
 	}
+	return string(data[4:8]) == "ftyp" &&
+		(string(data[8:12]) == "heic" || string(data[8:12]) == "heix" || string(data[8:12]) == "mif1")
+}
 
-	// Check common magic bytes
-	switch {
-	case data[0] == 0xFF && data[1] == 0xD8:
-		return "image/jpeg"
-	case data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G':
-		return "image/png"
-	case data[0] == 'G' && data[1] == 'I' && data[2] == 'F':
-		return "image/gif"
-	case data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46:
-		return "application/pdf"
-	case data[0] == 0x50 && data[1] == 0x4B:
-		return "application/zip"
-	default:
-		// Check if it looks like text (no zero bytes in first 512)
-		for _, b := range data[:512] {
-			if b == 0 {
-				return "application/octet-stream"
-			}
-		}
-		return "text/plain"
+// isAVIF detects AVIF images via "ftyp" box.
+func isAVIF(data []byte) bool {
+	if len(data) < 12 {
+		return false
 	}
+	return string(data[4:8]) == "ftyp" &&
+		(string(data[8:12]) == "avif" || string(data[8:12]) == "avis")
 }
 
 // isTextMIME returns true for text-like MIME types.

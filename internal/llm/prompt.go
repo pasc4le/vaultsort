@@ -41,13 +41,15 @@ func BuildPrompt(input PromptInput) []Message {
 		Content: "You are a file organization assistant. Respond only with valid JSON.",
 	}
 
-	// Build user prompt text (template without file content interpolation)
+	// Build user prompt text from template
 	prompt := input.Template
 	prompt = strings.ReplaceAll(prompt, "{{filename}}", input.Filename)
 	prompt = strings.ReplaceAll(prompt, "{{vault_dir}}", input.VaultDir)
-	prompt = strings.ReplaceAll(prompt, "{{file_contents}}", "(file attached as part)")
 
 	if len(input.FileContents) > 0 {
+		// Replace placeholder with accurate description
+		prompt = strings.ReplaceAll(prompt, "{{file_contents}}", "(file attached below)")
+
 		mimeType := detectMIME(input.FileContents)
 		// Limit to 10KB for LLM context (most providers have context limits)
 		limit := 10240
@@ -62,6 +64,9 @@ func BuildPrompt(input PromptInput) []Message {
 		})
 		return []Message{systemMsg, userMsg}
 	}
+
+	// No file content — remove misleading placeholder
+	prompt = strings.ReplaceAll(prompt, "{{file_contents}}", "(file content not available)")
 
 	userMsg := Message{
 		Role:    "user",

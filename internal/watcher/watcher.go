@@ -18,18 +18,24 @@ type Event struct {
 	WatchRoot string // the watch directory that contains this file
 }
 
+const (
+	processedTTL     = 24 * time.Hour
+	cleanupInterval  = 1 * time.Hour
+)
+
 // Watcher monitors directories for new files.
 type Watcher struct {
-	fsWatcher   *fsnotify.Watcher
-	events      chan Event
-	done        chan struct{}
-	pollTicker  *time.Ticker
-	pollInterval time.Duration
-	debounceDur time.Duration
-	processed   map[string]time.Time
-	mu          sync.Mutex
-	logger      *slog.Logger
-	watchDirs   map[string]string // path -> watch root
+	fsWatcher      *fsnotify.Watcher
+	events         chan Event
+	done           chan struct{}
+	pollTicker     *time.Ticker
+	pollInterval   time.Duration
+	debounceDur    time.Duration
+	processed      map[string]time.Time
+	mu             sync.Mutex
+	logger         *slog.Logger
+	watchDirs      map[string]string // path -> watch root
+	lastCleanup    time.Time
 }
 
 // ignoredFiles lists file patterns to skip.
@@ -151,6 +157,7 @@ func (w *Watcher) loop(ctx context.Context) {
 }
 
 func (w *Watcher) flushPending(pending map[string]struct{}) {
+	w.cleanupProcessed()
 	for p := range pending {
 		if w.wasProcessed(p) {
 			continue
@@ -163,6 +170,7 @@ func (w *Watcher) flushPending(pending map[string]struct{}) {
 }
 
 func (w *Watcher) pollDirectories() {
+	w.cleanupProcessed()
 	for watchRoot := range w.watchDirs {
 		entries, err := os.ReadDir(watchRoot)
 		if err != nil {
@@ -247,9 +255,28 @@ func (w *Watcher) markProcessed(path string) {
 	w.processed[path] = time.Now()
 }
 
+// cleanupProcessed removes entries older than processedTTL.
+func (w *Watcher) cleanupProcessed() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if time.Since(w.lastCleanup) < cleanupInterval {
+		return
+	}
+	w.lastCleanup = time.Now()
+
+	cutoff := time.Now().Add(-processedTTL)
+	for path, t := range w.processed {
+		if t.Before(cutoff) {
+			delete(w.processed, path)
+		}
+	}
+}
+
 // Reset clears the processed files map (for state recovery).
 func (w *Watcher) Reset() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.processed = make(map[string]time.Time)
+	w.lastCleanup = time.Now()
 }
