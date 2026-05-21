@@ -36,14 +36,15 @@ type ProcessedEntry struct {
 
 // Organizer orchestrates rule matching, LLM analysis, and file movement.
 type Organizer struct {
-	vaultDir   string
-	ruleEngine *rules.Engine
-	llmClient  *llm.Client
-	stateFile  string
-	dryRun     bool
-	logger     *slog.Logger
-	state      *State
-	mu         sync.Mutex
+	vaultDir    string
+	ruleEngine  *rules.Engine
+	llmClient   *llm.Client
+	stateFile   string
+	dryRun      bool
+	maxFileSize int64
+	logger      *slog.Logger
+	state       *State
+	mu          sync.Mutex
 }
 
 // New creates a new Organizer.
@@ -53,6 +54,7 @@ func New(
 	llmClient *llm.Client,
 	stateFile string,
 	dryRun bool,
+	maxFileSize int64,
 	logger *slog.Logger,
 ) (*Organizer, error) {
 	absVault, err := filepath.Abs(vaultDir)
@@ -66,13 +68,14 @@ func New(
 	}
 
 	org := &Organizer{
-		vaultDir:   absVault,
-		ruleEngine: ruleEngine,
-		llmClient:  llmClient,
-		stateFile:  stateFile,
-		dryRun:     dryRun,
-		logger:     logger,
-		state:      &State{ProcessedFiles: make(map[string]ProcessedEntry)},
+		vaultDir:    absVault,
+		ruleEngine:  ruleEngine,
+		llmClient:   llmClient,
+		stateFile:   stateFile,
+		dryRun:      dryRun,
+		maxFileSize: maxFileSize,
+		logger:      logger,
+		state:       &State{ProcessedFiles: make(map[string]ProcessedEntry)},
 	}
 
 	// Load existing state
@@ -304,32 +307,17 @@ func (o *Organizer) callLLM(ctx context.Context, messages []llm.Message, rule *r
 	return resp, nil
 }
 
-// readFileContent reads file contents up to maxFileRead bytes.
+// readFileContent reads file contents for sending to the LLM.
+// Images are sent in full (truncating makes them invalid).
+// Text files are excerpted to maxFileRead bytes.
+// Other binary files are skipped.
 func (o *Organizer) readFileContent(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 
-	// Skip files that are too large (> 1MB by default)
-	maxSize := int64(maxFileRead)
-	if info.Size() > maxSize {
-		// Read just the first portion
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		buf := make([]byte, maxSize)
-		n, err := f.Read(buf)
-		if err != nil {
-			return nil, err
-		}
-		return buf[:n], nil
-	}
-
-	// Detect MIME type to skip binary files
+	// Detect MIME type first, before deciding how to handle the file
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -340,15 +328,47 @@ func (o *Organizer) readFileContent(path string) ([]byte, error) {
 	n, _ := f.Read(sniff)
 	mimeType := httpDetectContentType(sniff[:n])
 
-	// Check if it's a text-like type
-	if !isTextMIME(mimeType) {
-		f.Close()
-		return nil, nil // binary file, don't send content
+	maxSize := o.maxFileSize
+	if maxSize <= 0 {
+		maxSize = 1048576 // 1MB fallback
 	}
 
-	// Read entire file (it's small)
-	f.Seek(0, 0)
-	return os.ReadFile(path)
+	switch {
+	case strings.HasPrefix(mimeType, "image/"), strings.HasPrefix(mimeType, "video/"):
+		// Images and videos must be sent in full — truncating makes them invalid.
+		// Respect maxFileSize as the upper limit.
+		if info.Size() > maxSize {
+			o.logger.Warn("media file exceeds max_file_size, skipping content",
+				"path", path, "size", info.Size(), "max", maxSize)
+			return nil, nil
+		}
+		f.Seek(0, 0)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+
+	case isTextMIME(mimeType):
+		// For text files: send a 10KB excerpt if file is large
+		if info.Size() <= int64(maxFileRead) {
+			f.Seek(0, 0)
+			return os.ReadFile(path)
+		}
+		f.Seek(0, 0)
+		buf := make([]byte, maxFileRead)
+		n, err := f.Read(buf)
+		if err != nil {
+			return nil, err
+		}
+		return buf[:n], nil
+
+	default:
+		// Other binary files (PDFs, archives, etc.) — don't send as content.
+		// They can't be meaningfully interpreted as text and would need
+		// provider-specific handling that isn't implemented yet.
+		return nil, nil
+	}
 }
 
 // validatePath ensures the destination is safe and under vaultDir.

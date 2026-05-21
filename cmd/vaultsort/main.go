@@ -191,6 +191,7 @@ Flags:
 		llmClient,
 		config.StateFile(),
 		*dryRun,
+		cfg.Settings.MaxFileSize,
 		logger,
 	)
 	if err != nil {
